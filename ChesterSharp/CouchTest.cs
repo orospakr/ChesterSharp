@@ -19,6 +19,8 @@ namespace SharpCouch
 	{
         Couch couch;
 
+        public static readonly string TEST_DATABASE = "chestersharp_test";
+
         public static readonly List<Person> PersonFixtures = new List<Person>() {
             new Person {Name = "Sally Acorn"},
             new Person {Name = "Jo Blow"}
@@ -40,34 +42,34 @@ namespace SharpCouch
             // use my own routines -- even though I would be using my own code as a testing predicate,
             // bugs would still cause obvious failures, and I would only have to use a small slice of my code
 
-
+            // couch.CreateDatabase(TEST_DATABASE);
         }
 
         [Test]
         public void ShouldJoinNonTrailingUriPathElements() {
-            Assert.AreEqual("awesome/win", Couch.uriJoin("awesome", "win"));
+            Assert.AreEqual("awesome/win", Couch.UriJoin("awesome", "win"));
         }
 
         [Test]
         public void ShouldJoinTrailingUriPathElements() {
-            Assert.AreEqual("awesome/win", Couch.uriJoin("awesome/", "win"));
+            Assert.AreEqual("awesome/win", Couch.UriJoin("awesome/", "win"));
         }
 
         [Test]
         public void ShouldJoinUriPathElementsAgainstBase() {
-            Assert.AreEqual("/win", Couch.uriJoin("/", "win"));
+            Assert.AreEqual("/win", Couch.UriJoin("/", "win"));
         }
 
         [Test]
         public void ShouldBuildBaseDatabaseUri() {
-            var dbUri = couch.buildDatabaseUri("snively");
+            var dbUri = couch.BuildDatabaseUri("snively");
             Assert.AreEqual("/snively", dbUri.AbsolutePath);
             Assert.AreEqual("http://localhost:5984/snively", dbUri.ToString());
         }
 
         [Test]
         public void ShouldBuildDocumentUri() {
-            Assert.AreEqual("http://localhost:5984/snively/mynote", couch.buildDocumentUri("snively", "mynote").ToString());
+            Assert.AreEqual("http://localhost:5984/snively/mynote", couch.BuildDocumentUri("snively", "mynote").ToString());
         }
 
         [Test]
@@ -76,8 +78,27 @@ namespace SharpCouch
         }
 
         [Test]
-        public void ShouldPostDocumentToCouchDb() {
-            var t = couch.postRawDocumentUpdate("snively", "blah blah", "couch db will not apperciate this string");
+        public void ShouldThrowErrorPutBogusDocumentUpdateToCouchDb() {
+            bool gotException = false;
+            try {
+                var t = couch.PutRawDocumentUpdate("snively", "blah blah", "anidentifier");
+                t.Wait();
+            } catch (AggregateException ae) {
+                ae.Handle( (e) => {
+                    if(e is CouchException) {
+                        gotException = true;
+                        return true;
+                    }
+                    return false;
+                });
+            }
+            Assert.IsTrue(gotException);
+        }
+
+        [Test]
+        public void ShouldPutDocumentUpdateToCouchDb() {
+            var p = new Person { Name = "Sally Acorn"};
+            var t = couch.PutDocumentUpdate<Person>("chestercouch_test", p, "sally");
             t.Wait();
         }
 
@@ -93,7 +114,7 @@ namespace SharpCouch
 
 		[Test()]
 		public void ShouldGetCouchDbVersionNumber () {
-            var t = couch.getServerVersion();
+            var t = couch.GetServerVersion();
 			t.Wait();
 			Console.Out.WriteLine (t.Result);
             Assert.AreEqual("1.2.0", t.Result);
@@ -101,10 +122,23 @@ namespace SharpCouch
 
         [Test()]
         public void ShouldGetDocument () {
-            var r = couch.getRawDocument("snively", "d359dcdfbd8f358c8a0207c12700012c");
+            var r = couch.GetRawDocument("snively", "d359dcdfbd8f358c8a0207c12700012c");
             r.Wait();
             Console.Out.WriteLine(r.Result);
         }
 
+        [Test]
+        public void ShouldCheckForDatabaseExistence() {
+            var t = couch.DoesDatabaseExist("snively");
+            t.Wait();
+            Assert.IsTrue(t.Result);
+        }
+
+        [Test]
+        public void ShouldCheckForDatabaseNonExistence() {
+            var t = couch.DoesDatabaseExist("snordelsaldfsaf");
+            t.Wait();
+            Assert.IsFalse(t.Result);
+        }
 	}
 }

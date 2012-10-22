@@ -4,6 +4,9 @@ using Newtonsoft.Json;
 using System.IO;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Runtime.Serialization;
+using System.Net.Http.Headers;
+using System.Net;
 
 namespace SharpCouch
 {
@@ -31,6 +34,53 @@ namespace SharpCouch
         public string Rev { get; set; }
     }
 
+    public class CouchError  {
+        [JsonProperty("reason")]
+        public string Reason { get; set; }
+    }
+
+    public class CouchException : Exception {
+        public HttpStatusCode StatusCode { get; set; }
+
+        public CouchException(string message, HttpStatusCode statusCode) : base(string.Format("[CouchException: StatusCode={0}, Message: {1}]", statusCode, message)) {
+        }
+    }
+
+    public class CouchDatabase {
+        [JsonProperty("db_name")]
+        public string Name { get; set; }
+
+        [JsonProperty("doc_count")]
+        public Int64 DocumentCount { get; set; }
+
+        [JsonProperty("doc_del_count")]
+        public Int64 DeletedDocumentCount { get; set; }
+
+        [JsonProperty("update_seq")]
+        public Int64 UpdateSequenceNumber { get; set; }
+
+        [JsonProperty("purge_seq")]
+        public Int64 PurgeSequenceNumber { get; set; }
+
+        [JsonProperty("compact_running")]
+        public bool CompactRUnning { get; set; }
+
+        [JsonProperty("disk_size")]
+        public Int64 DiskSize { get; set; }
+
+        [JsonProperty("data_size")]
+        public Int64 DataSize { get; set; }
+
+        // TODO make a usec DateTimeConverter
+        // [JsonProperty("instance_start_time")]
+
+        [JsonProperty("disk_format_version")]
+        public int DiskFormatVersion { get; set; }
+
+        [JsonProperty("committed_update_seq")]
+        public Int64 CommittedUpdateSeq { get; set; }
+    }
+
     /// <summary>
     /// Couch.
     /// 
@@ -43,34 +93,7 @@ namespace SharpCouch
         private string Hostname;
         private int Port;
 
-        /// <summary>
-        /// Joins given directory of file name path elements into a / separated path suitable for HTTP.
-        /// </summary>
-        /// <returns>
-        /// The join.
-        /// </returns>
-        /// <param name='parts'>
-        /// Parts.
-        /// </param>
-//        public static String uriBuild(params string[] parts) {
-//            var finalList = new Stack<String>();
-//            foreach(var part in parts) {
-//                if(part.Contains("/")) {
-//                    throw new ArgumentException("Path parts should not contain directory separators.");
-//                }
-//                if(part.Length == 0) {
-//                    continue;
-//                }
-//                if("..".Equals(part)) {
-//                    finalList.Pop();
-//                }
-//                // var x = new System.Net.Http.FormUrlEncodedContent(
-//                finalList.Push(Uri.EscapeDataString(part));
-//            }
-//            return "/" + String.Join("/", finalList.ToArray());
-//        }
-
-        public static string uriJoin(String basePath, String relativePath) {
+        public static string UriJoin(String basePath, String relativePath) {
             if(basePath == null || basePath.Length == 0) {
                 return String.Format("/{1}", relativePath); 
             } else if (basePath.EndsWith("/")) {
@@ -80,12 +103,12 @@ namespace SharpCouch
             }
         }
 
-        public static Uri uriJoin(Uri baseUri, String relativePath) {
+        public static Uri UriJoin(Uri baseUri, String relativePath) {
             // the + "/" may be a workaround for mono, not sure
-            return new Uri(baseUri, uriJoin(baseUri.AbsolutePath, relativePath));
+            return new Uri(baseUri, UriJoin(baseUri.AbsolutePath, relativePath));
         }
 
-        public Uri buildServerUri() {
+        public Uri BuildServerUri() {
             var url = new UriBuilder();
             url.Host = this.Hostname;
             url.Port = this.Port;
@@ -93,29 +116,55 @@ namespace SharpCouch
             return url.Uri;
         }
 
-        public Uri buildDatabaseUri(String database) {
-            return uriJoin(buildServerUri(), database);
+        public Uri BuildDatabaseUri(String database) {
+            return UriJoin(BuildServerUri(), database);
         }
 
-        public Uri buildDocumentUri(String database, String id) {
-            var dbUri = buildDatabaseUri(database);
-            return uriJoin(dbUri, id);
+        public Uri BuildDocumentUri(String database, String id) {
+            var dbUri = BuildDatabaseUri(database);
+            return UriJoin(dbUri, id);
         }
 
-        public async Task<String> getServerVersion() {
-
+        public async Task<HttpResponseMessage> GetAsync(Uri uri) {
             var http = new System.Net.Http.HttpClient();
-            var uri = buildServerUri();
+            var response = await http.GetAsync(uri);
+            if(response.IsSuccessStatusCode) {
+                return response;
+            } else {
+                var fetchedErrorJson = await response.Content.ReadAsStringAsync();
+                var error = JsonConvert.DeserializeObject<CouchError>(fetchedErrorJson);
+                throw new CouchException(error.Reason, response.StatusCode);
+            }
+        }
+
+        public async Task<HttpResponseMessage> PostAsync(Uri uri, HttpContent content) {
+            var http = new System.Net.Http.HttpClient();
+            var response = await http.PostAsync(uri, content);
+            if(response.IsSuccessStatusCode) {
+                return response;
+            } else {
+                var fetchedErrorJson = JsonConvert.DeserializeObject<CouchError>(await response.Content.ReadAsStringAsync());
+                throw new CouchException(fetchedErrorJson.Reason, response.StatusCode);
+            }
+        }
+
+        public async Task<HttpResponseMessage> PutAsync(Uri uri, HttpContent content) {
+            var http = new System.Net.Http.HttpClient();
+            var response = await http.PutAsync(uri, content);
+            if(response.IsSuccessStatusCode) {
+                return response;
+            } else {
+                var fetchedErrorJson = JsonConvert.DeserializeObject<CouchError>(await response.Content.ReadAsStringAsync());
+                throw new CouchException(fetchedErrorJson.Reason, response.StatusCode);
+            }
+        }
+
+        public async Task<String> GetServerVersion() {
+            var uri = BuildServerUri();
             Console.WriteLine("Fetching: {0}", uri.ToString());
             // http.BaseAddress = uri;
 
-            var response = await http.GetAsync(uri);
-            response.EnsureSuccessStatusCode();
-
-            if(response.StatusCode != System.Net.HttpStatusCode.OK) {
-                // TODO throw our own exception type
-                throw new Exception("Document does not exist.");
-            }
+            var response = await GetAsync(uri);
 
             var fetchedJson = await response.Content.ReadAsStringAsync();
 
@@ -124,27 +173,23 @@ namespace SharpCouch
             return serverInfo.Version;
         }
 
-        public async Task<String> getRawDocument(String database, String id) {
-            var http = new System.Net.Http.HttpClient();
+        public async Task<String> GetRawDocument(String database, String id) {
 
-            var uri = buildDocumentUri(database, id);
+            var uri = BuildDocumentUri(database, id);
 
             Console.WriteLine("Fetching document from: {0}", uri);
 
-            var response = await http.GetAsync(uri);
+            var response = await GetAsync(uri);
             response.EnsureSuccessStatusCode();
-
-            if(response.StatusCode != System.Net.HttpStatusCode.OK) {
-                // TODO throw our own exception type
-                throw new Exception("Document does not exist.");
-            }
 
             return await response.Content.ReadAsStringAsync();
         }
 
+
+
         /// </param>
-        public async Task<T> getDocument<T>(String database, String id) where T : CouchDocument {
-            var fetchedJson = await getRawDocument(database, id);
+        public async Task<T> GetDocument<T>(String database, String id) where T : CouchDocument {
+            var fetchedJson = await GetRawDocument(database, id);
             return JsonConvert.DeserializeObject<T>(fetchedJson);
         }
 
@@ -160,43 +205,47 @@ namespace SharpCouch
         /// <param name='id'>
         /// ID of the document being updated.
         /// </param>
-        public async Task<String> postRawDocumentUpdate(String database, String content, String id) {
-            var http = new System.Net.Http.HttpClient();
+        public async Task<String> PutRawDocumentUpdate(String database, String content, String id) {
             
-            var uri = buildDocumentUri(database, id);
+            var uri = BuildDocumentUri(database, id);
             Console.WriteLine("Posting document to: {0}", uri);
 
-            var response = await http.PostAsync(uri, new StringContent(content));
+            var httpContent = new StringContent(content);
+            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            var response = await PutAsync(uri, httpContent);
 
             response.EnsureSuccessStatusCode();
 
             return await response.Content.ReadAsStringAsync();
         }
 
-
-        public static Task<string> fetchUrlTest() {
-            var http = new System.Net.Http.HttpClient();
-
-            var tcs = new TaskCompletionSource<String>();
-            
-            http.GetAsync("http://www.debian.org").ContinueWith((request) => {
-                var response = request.Result;
-                response.EnsureSuccessStatusCode();
-                response.Content.ReadAsStringAsync().ContinueWith((bodyResult) => {
-                    if (bodyResult.IsFaulted) {
-                        throw bodyResult.Exception;
-                    }
-                    Console.Out.WriteLine(bodyResult.Result);
-                    tcs.SetResult(bodyResult.Result);
-                });
-            });
-            return tcs.Task;
+        public async Task<T> PutDocumentUpdate<T>(String database, T content, String id) where T: CouchDocument {
+            var json = JsonConvert.SerializeObject(content);
+            var resultantJson = await PutRawDocumentUpdate(database, json, id);
+            return JsonConvert.DeserializeObject<T>(resultantJson);
         }
 
-        public static async Task<string> fetchUrlTestNew() {
-            var http = new System.Net.Http.HttpClient();
-            var response = await http.GetStringAsync("http://www.debian.org");
-            return response;
+        public async Task CreateDatabase(String database) {
+            var uri = BuildDatabaseUri(database);
+            var content = new StringContent("");
+            await PutAsync(uri, content);
+        }
+
+        public async Task<bool> DoesDatabaseExist(string database) {
+            var uri = BuildDatabaseUri(database);
+            var http = new HttpClient();
+            var exists = true;
+            var r = await http.GetAsync(uri);
+            return r.StatusCode != HttpStatusCode.NotFound;
+        }
+
+        public async Task<CouchDatabase> GetDatabaseInfo(string database) {
+            // TODO factor apart get/updateDocument even more into single-document fetching code, usable from GetDocument and PutDocumentUpdate.
+            var uri = BuildDatabaseUri(database);
+            var r = await GetAsync(uri);
+            var fetchedJson = r.Content.ToString();
+            return JsonConvert.DeserializeObject<CouchDatabase>(fetchedJson);
         }
 
         public Couch(string hostname, int port) {
