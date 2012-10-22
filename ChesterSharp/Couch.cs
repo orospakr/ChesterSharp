@@ -39,10 +39,28 @@ namespace SharpCouch
         public string Reason { get; set; }
     }
 
+    public class ActionResult {
+        [JsonProperty("ok")]
+        public bool OK { get; set; }
+    }
+
+    public class DocumentCreationResult : ActionResult {
+        [JsonProperty("id")]
+        public string Id { get; set; }
+        
+        [JsonProperty("rev")]
+        public string Rev { get; set; }
+    }
+
     public class CouchException : Exception {
         public HttpStatusCode StatusCode { get; set; }
 
         public CouchException(string message, HttpStatusCode statusCode) : base(string.Format("[CouchException: StatusCode={0}, Message: {1}]", statusCode, message)) {
+        }
+    }
+
+    public class NotFoundException : CouchException {
+        public NotFoundException(string message, HttpStatusCode statusCode) : base(message, statusCode) {
         }
     }
 
@@ -86,6 +104,7 @@ namespace SharpCouch
     /// 
     /// http://guide.couchdb.org/draft/api.html
     /// http://wiki.apache.org/couchdb/HTTP_Document_API
+    /// http://en.wikipedia.org/wiki/CouchDB
     /// 
     /// </summary>
     public class Couch
@@ -125,7 +144,15 @@ namespace SharpCouch
             return UriJoin(dbUri, id);
         }
 
-        public async Task<HttpResponseMessage> GetAsync(Uri uri) {
+        public CouchException HandleError(CouchError error, HttpStatusCode statusCode) {
+            if (statusCode == HttpStatusCode.NotFound) {
+                return new NotFoundException(error.Reason, statusCode);
+            } else {
+                return new CouchException(error.Reason, statusCode);
+            }
+        }
+
+        public async Task<HttpResponseMessage> GetRawAsync(Uri uri) {
             var http = new System.Net.Http.HttpClient();
             var response = await http.GetAsync(uri);
             if(response.IsSuccessStatusCode) {
@@ -133,29 +160,41 @@ namespace SharpCouch
             } else {
                 var fetchedErrorJson = await response.Content.ReadAsStringAsync();
                 var error = JsonConvert.DeserializeObject<CouchError>(fetchedErrorJson);
-                throw new CouchException(error.Reason, response.StatusCode);
+                throw HandleError(error, response.StatusCode);
             }
         }
 
-        public async Task<HttpResponseMessage> PostAsync(Uri uri, HttpContent content) {
+        public async Task<HttpResponseMessage> DeleteRawAsync(Uri uri) {
+            var http = new System.Net.Http.HttpClient();
+            var response = await http.DeleteAsync(uri);
+            if(response.IsSuccessStatusCode) {
+                return response;
+            } else {
+                var fetchedErrorJson = await response.Content.ReadAsStringAsync();
+                var error = JsonConvert.DeserializeObject<CouchError>(fetchedErrorJson);
+                throw HandleError(error, response.StatusCode);
+            }
+        }
+
+        public async Task<HttpResponseMessage> PostRawAsync(Uri uri, HttpContent content) {
             var http = new System.Net.Http.HttpClient();
             var response = await http.PostAsync(uri, content);
             if(response.IsSuccessStatusCode) {
                 return response;
             } else {
                 var fetchedErrorJson = JsonConvert.DeserializeObject<CouchError>(await response.Content.ReadAsStringAsync());
-                throw new CouchException(fetchedErrorJson.Reason, response.StatusCode);
+                throw HandleError(fetchedErrorJson, response.StatusCode);
             }
         }
 
-        public async Task<HttpResponseMessage> PutAsync(Uri uri, HttpContent content) {
+        public async Task<HttpResponseMessage> PutRawAsync(Uri uri, HttpContent content) {
             var http = new System.Net.Http.HttpClient();
             var response = await http.PutAsync(uri, content);
             if(response.IsSuccessStatusCode) {
                 return response;
             } else {
                 var fetchedErrorJson = JsonConvert.DeserializeObject<CouchError>(await response.Content.ReadAsStringAsync());
-                throw new CouchException(fetchedErrorJson.Reason, response.StatusCode);
+                throw HandleError(fetchedErrorJson, response.StatusCode);
             }
         }
 
@@ -164,7 +203,7 @@ namespace SharpCouch
             Console.WriteLine("Fetching: {0}", uri.ToString());
             // http.BaseAddress = uri;
 
-            var response = await GetAsync(uri);
+            var response = await GetRawAsync(uri);
 
             var fetchedJson = await response.Content.ReadAsStringAsync();
 
@@ -179,13 +218,11 @@ namespace SharpCouch
 
             Console.WriteLine("Fetching document from: {0}", uri);
 
-            var response = await GetAsync(uri);
+            var response = await GetRawAsync(uri);
             response.EnsureSuccessStatusCode();
 
             return await response.Content.ReadAsStringAsync();
         }
-
-
 
         /// </param>
         public async Task<T> GetDocument<T>(String database, String id) where T : CouchDocument {
@@ -213,7 +250,7 @@ namespace SharpCouch
             var httpContent = new StringContent(content);
             httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-            var response = await PutAsync(uri, httpContent);
+            var response = await PutRawAsync(uri, httpContent);
 
             response.EnsureSuccessStatusCode();
 
@@ -228,14 +265,33 @@ namespace SharpCouch
 
         public async Task CreateDatabase(String database) {
             var uri = BuildDatabaseUri(database);
-            var content = new StringContent("");
-            await PutAsync(uri, content);
+            await PutRawAsync(uri, null);
+        }
+
+        public async Task DeleteDatabase(String database) {
+            var uri = BuildDatabaseUri(database);
+            await DeleteRawAsync(uri);
+        }
+
+        /// <summary>
+        /// Attempts to delete the provided database, and if already does not exist it succeeds.
+        /// </summary>
+        public async Task EnsureDatabaseDeleted(String database) {
+            try {
+                await DeleteDatabase(database);
+            } catch (AggregateException ae) {
+                ae.Handle((e) => {
+                    if(e is NotFoundException) {
+                        return true;
+                    }
+                    return false;
+                });
+            }
         }
 
         public async Task<bool> DoesDatabaseExist(string database) {
             var uri = BuildDatabaseUri(database);
             var http = new HttpClient();
-            var exists = true;
             var r = await http.GetAsync(uri);
             return r.StatusCode != HttpStatusCode.NotFound;
         }
@@ -243,7 +299,7 @@ namespace SharpCouch
         public async Task<CouchDatabase> GetDatabaseInfo(string database) {
             // TODO factor apart get/updateDocument even more into single-document fetching code, usable from GetDocument and PutDocumentUpdate.
             var uri = BuildDatabaseUri(database);
-            var r = await GetAsync(uri);
+            var r = await GetRawAsync(uri);
             var fetchedJson = r.Content.ToString();
             return JsonConvert.DeserializeObject<CouchDatabase>(fetchedJson);
         }
