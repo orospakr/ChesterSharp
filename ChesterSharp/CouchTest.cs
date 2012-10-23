@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
+using System.Net.Http;
 
 namespace SharpCouch
 {
@@ -22,10 +23,12 @@ namespace SharpCouch
         public static readonly string TEST_DATABASE = "chestersharp_test";
         public static readonly string CREATION_TEST_DATABASE = "chestersharp_creation_test";
 
-        public static readonly List<Person> PersonFixtures = new List<Person>() {
-            new Person {Name = "Sally Acorn"},
-            new Person {Name = "Jo Blow"}
-        };
+        // these are instantiated in BeforeEach() because they are modified (id and rev updated) by the
+        // Couch routines they are subjected to, and this TestFixture object is only instantiated
+        // once for all tests.
+        private Person SallyFixture;
+        private Person HayekFixture;
+        public List<Person> PersonFixtures;
 
 //		[Test()]
 //		public void TestCase ()
@@ -43,9 +46,20 @@ namespace SharpCouch
             // use my own routines -- even though I would be using my own code as a testing predicate,
             // bugs would still cause obvious failures, and I would only have to use a small slice of my code
 
-            couch.EnsureDatabaseDeleted(TEST_DATABASE);
-            couch.EnsureDatabaseDeleted(CREATION_TEST_DATABASE);
-            couch.CreateDatabase(TEST_DATABASE);
+            SallyFixture = new Person {Name = "Sally Acorn", Id = "sally"};
+            HayekFixture = new Person {Name = "Frederich Hayek"}; // hayek gets a generated Id
+
+            PersonFixtures = new List<Person>() {
+                SallyFixture,
+                HayekFixture
+            };
+            couch.EnsureDatabaseDeleted(TEST_DATABASE).Wait();
+            couch.EnsureDatabaseDeleted(CREATION_TEST_DATABASE).Wait();
+            couch.CreateDatabase(TEST_DATABASE).Wait();
+
+            foreach (var personFixture in PersonFixtures) {
+                couch.CreateDocument<Person>(TEST_DATABASE, personFixture).Wait();
+            }
         }
 
         [Test]
@@ -65,14 +79,14 @@ namespace SharpCouch
 
         [Test]
         public void ShouldBuildBaseDatabaseUri() {
-            var dbUri = couch.BuildDatabaseUri("snively");
-            Assert.AreEqual("/snively", dbUri.AbsolutePath);
-            Assert.AreEqual("http://localhost:5984/snively", dbUri.ToString());
+            var dbUri = couch.BuildDatabaseUri("foo");
+            Assert.AreEqual("/foo", dbUri.AbsolutePath);
+            Assert.AreEqual("http://localhost:5984/foo", dbUri.ToString());
         }
 
         [Test]
         public void ShouldBuildDocumentUri() {
-            Assert.AreEqual("http://localhost:5984/snively/mynote", couch.BuildDocumentUri("snively", "mynote").ToString());
+            Assert.AreEqual("http://localhost:5984/foo/mynote", couch.BuildDocumentUri("foo", "mynote").ToString());
         }
 
         [Test]
@@ -84,7 +98,7 @@ namespace SharpCouch
         public void ShouldThrowErrorPutBogusDocumentUpdateToCouchDb() {
             bool gotException = false;
             try {
-                var t = couch.PutRawDocumentUpdate("snively", "blah blah", "anidentifier");
+                var t = couch.PutRawDocument(TEST_DATABASE, "blah blah", "anidentifier");
                 t.Wait();
             } catch (AggregateException ae) {
                 ae.Handle( (e) => {
@@ -99,12 +113,41 @@ namespace SharpCouch
         }
 
         [Test]
-        public void ShouldPutDocumentUpdateToCouchDb() {
-            var p = new Person { Name = "Sally Acorn"};
-            var t = couch.PutDocumentUpdate<Person>("chestercouch_test", p, "sally");
+        public void ShouldUpdateDocument() {
+            var newName = "Excellent Economist";
+            Assert.NotNull(HayekFixture.Rev);
+            HayekFixture.Name = newName;
+            var t = couch.UpdateDocument<Person>(TEST_DATABASE, HayekFixture);
             t.Wait();
+
+            var check = couch.GetDocument<Person>(TEST_DATABASE, HayekFixture.Id);
+            check.Wait();
+            Assert.AreEqual(newName, check.Result.Name);
         }
 
+        [Test]
+        public void ShouldRefuseToUpdateDocumentWithoutRev() {
+            var gotException = false;
+            try {
+                var p = new Person { Name = "Sally Acorn", Id = "sally"};
+                var t = couch.UpdateDocument<Person>(TEST_DATABASE, p);
+                t.Wait();
+            } catch (AggregateException ae) {
+                ae.Handle((e) => {
+                    if (e is ArgumentOutOfRangeException) {
+                        gotException = true;
+                        return true;
+                    }
+                    return false;
+                });
+            }
+            Assert.IsTrue(gotException);
+        }
+
+        /// <summary>
+        /// Test of system breakage: at least on Mono 2.11.4, the relative URI appending behaviour
+        /// of Uri does not appear to work as seen in the MS documentation.
+        /// </summary>
         [Test]
         public void SystemDotUriShouldNotBeADick() {
             var myuri = new Uri("http://blatz.ca");
@@ -115,7 +158,20 @@ namespace SharpCouch
             Assert.AreEqual("/top/down", myuriWithSubPath.AbsolutePath);
         }
 
-		[Test()]
+//        /// <summary>
+//        /// Test of system breakage: at least on Mono 2.11.4, HttpClient hangs when trying to post blank.
+//        /// The failure case is that this test hangs while waiting for the test to complete!
+//        /// </summary>
+//        [Test]
+//        public void SystemNetHttpClientShouldNotHangWhenPostingEmptyString() {
+//            // THEN CONTINUE AND CREATE PPOST NEW DOCUMENT CODE in Couch for fixture pushing
+//            var http = new HttpClient();
+//            var emptyString = new StringContent("");
+//            var t = http.PostAsync(new Uri("http://www.debian.org/"), emptyString);
+//            t.Wait();
+//        }
+
+		[Test]
 		public void ShouldGetCouchDbVersionNumber () {
             var t = couch.GetServerVersion();
 			t.Wait();
@@ -123,9 +179,9 @@ namespace SharpCouch
             Assert.AreEqual("1.2.0", t.Result);
 		}
 
-        [Test()]
-        public void ShouldGetDocument () {
-            var r = couch.GetRawDocument(CREATION_TEST_DATABASE, "d359dcdfbd8f358c8a0207c12700012c");
+        [Test]
+        public void ShouldGetRawDocument () {
+            var r = couch.GetRawDocument(TEST_DATABASE, SallyFixture.Id);
             r.Wait();
             Console.Out.WriteLine(r.Result);
         }

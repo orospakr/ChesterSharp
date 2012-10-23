@@ -27,10 +27,10 @@ namespace SharpCouch
     }
 
     public class CouchDocument {
-        [JsonProperty("id")]
+        [JsonProperty("_id")]
         public string Id { get; set; }
 
-        [JsonProperty("rev")]
+        [JsonProperty("_rev")]
         public string Rev { get; set; }
     }
 
@@ -231,7 +231,7 @@ namespace SharpCouch
         }
 
         /// <summary>
-        /// Updates a document with arbitrary string data.
+        /// Updates or creates a document, with specified id, with arbitrary string data.
         /// </summary>
         /// <returns>
         /// Result data produced by CouchDB.  JSON with just id and rev, usually.
@@ -240,9 +240,9 @@ namespace SharpCouch
         /// String data.  Remember, CouchDB expects JSON.
         /// </param>
         /// <param name='id'>
-        /// ID of the document being updated.
+        /// ID of the document being created/updated.
         /// </param>
-        public async Task<String> PutRawDocumentUpdate(String database, String content, String id) {
+        public async Task<String> PutRawDocument(String database, String content, String id) {
             
             var uri = BuildDocumentUri(database, id);
             Console.WriteLine("Posting document to: {0}", uri);
@@ -252,15 +252,74 @@ namespace SharpCouch
 
             var response = await PutRawAsync(uri, httpContent);
 
-            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync();
+        }
+
+        public async Task<String> PostRawDocument(String database, String content) {
+            var uri = BuildDatabaseUri(database);
+
+            var httpContent = new StringContent(content);
+            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            var response = await PostRawAsync(uri, httpContent);
 
             return await response.Content.ReadAsStringAsync();
         }
 
-        public async Task<T> PutDocumentUpdate<T>(String database, T content, String id) where T: CouchDocument {
-            var json = JsonConvert.SerializeObject(content);
-            var resultantJson = await PutRawDocumentUpdate(database, json, id);
+        /// <summary>
+        /// Updates an existing document in the database.
+        /// </summary>
+        /// <returns>
+        /// The document.
+        /// </returns>
+        /// <param name='database'>
+        /// Database name.
+        /// </param>
+        /// <param name='content'>
+        /// The Document object to update.  Id and Rev must both be set.
+        /// </param>
+        /// <typeparam name='T'>
+        /// The document type.
+        /// </typeparam>
+        public async Task<T> UpdateDocument<T>(String database, T content) where T: CouchDocument {
+            if(content.Id == null || content.Id.Length == 0) {
+                throw new ArgumentOutOfRangeException("Document to update must have Id set.");
+            }
+            if(content.Rev == null || content.Rev.Length == 0) {
+                throw new ArgumentOutOfRangeException("Document to update must have current Rev set.");
+            }
+            return await PutDocument<T>(database, content, content.Id);
+        }
+
+        public async Task<T> CreateDocument<T>(String database, T content) where T: CouchDocument {
+            if(content.Rev != null) {
+                throw new ArgumentException(String.Format("New documents must not have a parent rev. '{0}' specified.", content.Rev));
+            }
+            if(content.Id != null) {
+                return await PutDocument<T>(database, content, content.Id);
+            } else {
+                return await PostDocument<T>(database, content);
+            }
+        }
+
+        public string SerializeObject(CouchDocument doc) {
+            return JsonConvert.SerializeObject(doc, Formatting.Indented, new JsonSerializerSettings {DefaultValueHandling = DefaultValueHandling.Ignore});
+        }
+
+        public async Task<T> PutDocument<T>(String database, T content, String id) where T: CouchDocument {
+            var json = SerializeObject(content);
+            var resultantJson = await PutRawDocument(database, json, id);
+            // TODO; this will screw up, becase we do *NOT* get the whole object back.  instead, we must make an UpdateResult object, deserialize to that, and set them back into the POCO
             return JsonConvert.DeserializeObject<T>(resultantJson);
+        }
+
+        public async Task<T> PostDocument<T>(String database, T content) where T: CouchDocument {
+            var json = SerializeObject(content);
+            var resultantJson = await PostRawDocument(database, json);
+            var result = JsonConvert.DeserializeObject<DocumentCreationResult>(resultantJson);
+            content.Id = result.Id;
+            content.Rev = result.Rev;
+            return content;
         }
 
         public async Task CreateDatabase(String database) {
@@ -279,13 +338,7 @@ namespace SharpCouch
         public async Task EnsureDatabaseDeleted(String database) {
             try {
                 await DeleteDatabase(database);
-            } catch (AggregateException ae) {
-                ae.Handle((e) => {
-                    if(e is NotFoundException) {
-                        return true;
-                    }
-                    return false;
-                });
+            } catch (NotFoundException) {
             }
         }
 
