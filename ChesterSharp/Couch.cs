@@ -44,6 +44,66 @@ namespace SharpCouch
         public bool OK { get; set; }
     }
 
+    public abstract class View {
+        [JsonProperty("map")]
+        public virtual String Map { get { return null; } }
+
+        [JsonProperty("reduce")]
+        public virtual String Reduce { get { return null; } }
+    }
+
+    public class DesignDocument : CouchDocument {
+        [AttributeUsage(AttributeTargets.Class)]
+        protected class DesignDocumentName : System.Attribute {
+            public string Name { get; set; }
+            public DesignDocumentName(string name) {
+                Name = name;
+            }
+        }
+
+        [JsonProperty("views")]
+        public Dictionary<string, View> Views
+        {
+            get
+            {
+                var result = new Dictionary<string, View>();
+                foreach(var type in this.GetType().GetNestedTypes()) {
+                    if(typeof(View).IsAssignableFrom(type)) {
+                        var constructors = type.GetConstructor(Type.EmptyTypes);
+                        var viewObj = constructors.Invoke(new object[] { });
+                        result.Add(type.Name, (View)viewObj);
+                    }
+                }
+                return result;
+            }
+        }
+
+        public string GetName() { 
+            var attrs =  this.GetType().GetCustomAttributes(typeof(DesignDocument.DesignDocumentName), true);
+            if(attrs.Length == 0) {
+                return this.GetType().Name;
+            } else {
+                return ((DesignDocumentName)attrs[0]).Name;
+            }
+        }
+
+        [JsonProperty("_id")]
+        public new string Id
+        {
+            get
+            {
+                return String.Format("_design/{0}", this.GetName());
+            }
+            set
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        public DesignDocument() {
+        }
+    }
+
     public class DocumentCreationResult : ActionResult {
         [JsonProperty("id")]
         public string Id { get; set; }
@@ -105,6 +165,7 @@ namespace SharpCouch
     /// http://guide.couchdb.org/draft/api.html
     /// http://wiki.apache.org/couchdb/HTTP_Document_API
     /// http://en.wikipedia.org/wiki/CouchDB
+    /// http://guide.couchdb.org/draft/design.html
     /// 
     /// </summary>
     public class Couch
@@ -230,6 +291,11 @@ namespace SharpCouch
             return JsonConvert.DeserializeObject<T>(fetchedJson);
         }
 
+        public async Task<T> GetDesignDocument<T>(String database, String id) where T : DesignDocument {
+            var fetchedJson = await GetRawDocument(database, id);
+            return JsonConvert.DeserializeObject<T>(fetchedJson);
+        }
+
         /// <summary>
         /// Updates or creates a document, with specified id, with arbitrary string data.
         /// </summary>
@@ -243,7 +309,6 @@ namespace SharpCouch
         /// ID of the document being created/updated.
         /// </param>
         public async Task<String> PutRawDocument(String database, String content, String id) {
-            
             var uri = BuildDocumentUri(database, id);
             Console.WriteLine("Posting document to: {0}", uri);
 
@@ -355,6 +420,13 @@ namespace SharpCouch
             var r = await GetRawAsync(uri);
             var fetchedJson = r.Content.ToString();
             return JsonConvert.DeserializeObject<CouchDatabase>(fetchedJson);
+        }
+
+        public async Task<DD> UpdateDesignDocument<DD>(string database) where DD : DesignDocument, new() {
+            // while the DesignDocument objects themselves are intended to have no runtime state,
+            // an instanced version is used for serialization and submission.
+            var pd = new DD();
+            return await this.CreateDocument<DD>(database, pd);
         }
 
         public Couch(string hostname, int port) {

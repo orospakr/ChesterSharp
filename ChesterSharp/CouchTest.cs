@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using System.Net.Http;
+using Newtonsoft.Json;
 
 namespace SharpCouch
 {
@@ -13,6 +14,24 @@ namespace SharpCouch
 
     public class Person: CouchDocument {
         public string Name { get; set; }
+
+        // "type" field expected by the PersonDesign's map.
+        [JsonProperty("type")]
+        public string DocumentType { get; set; }
+    }
+
+    [DesignDocumentName("person")]
+    public class PersonDesign : DesignDocument {
+        public class All : View {
+            public override string Map { get {
+                    return @"function(doc) {
+                        if(doc[""type""] === ""Person"") {
+                            emit(doc[""_id""], doc.name);
+                        }
+                    }";
+                }
+            }
+        }
     }
 
 	[TestFixture]
@@ -46,8 +65,8 @@ namespace SharpCouch
             // use my own routines -- even though I would be using my own code as a testing predicate,
             // bugs would still cause obvious failures, and I would only have to use a small slice of my code
 
-            SallyFixture = new Person {Name = "Sally Acorn", Id = "sally"};
-            HayekFixture = new Person {Name = "Frederich Hayek"}; // hayek gets a generated Id
+            SallyFixture = new Person {Name = "Sally Acorn", Id = "sally", DocumentType = "Person"};
+            HayekFixture = new Person {Name = "Frederich Hayek", DocumentType = "Person"}; // hayek gets a generated Id
 
             PersonFixtures = new List<Person>() {
                 SallyFixture,
@@ -129,7 +148,7 @@ namespace SharpCouch
         public void ShouldRefuseToUpdateDocumentWithoutRev() {
             var gotException = false;
             try {
-                var p = new Person { Name = "Sally Acorn", Id = "sally"};
+                var p = new Person { Name = "MissingNo", Id = "missigno"};
                 var t = couch.UpdateDocument<Person>(TEST_DATABASE, p);
                 t.Wait();
             } catch (AggregateException ae) {
@@ -219,6 +238,15 @@ namespace SharpCouch
             var te = couch.DoesDatabaseExist(TEST_DATABASE);
             te.Wait();
             Assert.IsFalse(te.Result);
+        }
+
+        [Test]
+        public void ShouldCreateDesignDocument() {
+            var dd = new PersonDesign();
+            // var t = couch.CreateDocument<PersonDesign>(TEST_DATABASE, dd);
+            var t = couch.UpdateDesignDocument<PersonDesign>(TEST_DATABASE);
+            t.Wait();
+            // TODO: ANDREW START HERE and TEST invokation of views!
         }
 	}
 }

@@ -6,13 +6,15 @@ Plans:
 * post a single document, with DTO: DONE
 
 * fetch a view of multiple documents, with DTO
-* design document decorators
+* design documents DONE
 * create a database: DONE
 * view-level mapping to DTOs (built in find/findAll() routines)
 * compare current design documents in system, update if necessary
 * changes feed (whee streaming)
 * changes feed with specified view
 * list revisions, conflict resolution?
+* attachments
+
 
 * sequence numbering? seems like a local rememberance -- at least
   across the lifetime of a given consumer of events that wants
