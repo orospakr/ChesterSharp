@@ -46,7 +46,7 @@ namespace SharpCouch
 
     public abstract class View {
         [JsonProperty("map")]
-        public virtual String Map { get { return null; } }
+        public abstract String Map { get; }
 
         [JsonProperty("reduce")]
         public virtual String Reduce { get { return null; } }
@@ -145,7 +145,7 @@ namespace SharpCouch
         }
     }
 
-    public class CouchDatabase {
+    public class DatabaseInfo {
         [JsonProperty("db_name")]
         public string Name { get; set; }
 
@@ -162,7 +162,7 @@ namespace SharpCouch
         public Int64 PurgeSequenceNumber { get; set; }
 
         [JsonProperty("compact_running")]
-        public bool CompactRUnning { get; set; }
+        public bool CompactRunning { get; set; }
 
         [JsonProperty("disk_size")]
         public Int64 DiskSize { get; set; }
@@ -180,6 +180,181 @@ namespace SharpCouch
         public Int64 CommittedUpdateSeq { get; set; }
     }
 
+    public class CouchDatabase {
+        private string Database;
+        private Couch CouchDB;
+
+        public CouchDatabase(Couch couch, string databaseName) {
+            this.CouchDB = couch;
+            this.Database = databaseName;
+        }
+
+        public Uri BuildDocumentUri(String id) {
+            var dbUri = CouchDB.BuildDatabaseUri(Database);
+            return Couch.UriJoin(dbUri, id);
+        }
+
+        public Uri BuildDesignDocumentUri(String designDocumentName) {
+            var dbUri = CouchDB.BuildDatabaseUri(Database);
+            return Couch.UriJoin(Couch.UriJoin(dbUri, "_design"), designDocumentName);
+        }
+        
+        public Uri BuildViewUri(String designDocumentName, String viewName) {
+            return Couch.UriJoin(Couch.UriJoin(BuildDesignDocumentUri(designDocumentName), "_view"), viewName);
+        }
+        
+        public async Task<String> GetRawDocument(String id) {
+            var uri = BuildDocumentUri(id);
+            
+            Console.WriteLine("Fetching document from: {0}", uri);
+            
+            var response = await CouchDB.GetRawAsync(uri);
+            
+            return await response.Content.ReadAsStringAsync();
+        }
+        
+        /// </param>
+        public async Task<T> GetDocument<T>(String id) where T : CouchDocument {
+            var fetchedJson = await GetRawDocument(id);
+            return JsonConvert.DeserializeObject<T>(fetchedJson);
+        }
+        
+        public async Task<T> GetDesignDocument<T>(String id) where T : DesignDocument {
+            var fetchedJson = await GetRawDocument(id);
+            return JsonConvert.DeserializeObject<T>(fetchedJson);
+        }
+
+        public async Task<T> PutDocument<T>(T content, String id) where T: CouchDocument {
+            var json = CouchDB.SerializeObject(content);
+            var resultantJson = await PutRawDocument(json, id);
+            // TODO; this will screw up, becase we do *NOT* get the whole object back.  instead, we must make an UpdateResult object, deserialize to that, and set them back into the POCO
+            return JsonConvert.DeserializeObject<T>(resultantJson);
+        }
+        
+        /// <summary>
+        /// Updates or creates a document, with specified id, with arbitrary string data.
+        /// </summary>
+        /// <returns>
+        /// Result data produced by CouchDB.  JSON with just id and rev, usually.
+        /// </returns>
+        /// <param name='content'>
+        /// String data.  Remember, CouchDB expects JSON.
+        /// </param>
+        /// <param name='id'>
+        /// ID of the document being created/updated.
+        /// </param>
+        public async Task<String> PutRawDocument(String content, String id) {
+            var uri = BuildDocumentUri(id);
+            Console.WriteLine("Posting document to: {0}", uri);
+
+            var httpContent = new StringContent(content);
+            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            
+            var response = await CouchDB.PutRawAsync(uri, httpContent);
+            
+            return await response.Content.ReadAsStringAsync();
+        }
+        
+        public async Task<String> PostRawDocument(String content) {
+            var uri = CouchDB.BuildDatabaseUri(Database);
+            
+            var httpContent = new StringContent(content);
+            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            
+            var response = await CouchDB.PostRawAsync(uri, httpContent);
+            
+            return await response.Content.ReadAsStringAsync();
+        }
+        
+        /// <summary>
+        /// Updates an existing document in the database.
+        /// </summary>
+        /// <returns>
+        /// The document.
+        /// </returns>
+        /// <param name='database'>
+        /// Database name.
+        /// </param>
+        /// <param name='content'>
+        /// The Document object to update.  Id and Rev must both be set.
+        /// </param>
+        /// <typeparam name='T'>
+        /// The document type.
+        /// </typeparam>
+        public async Task<T> UpdateDocument<T>(T content) where T: CouchDocument {
+            if(content.Id == null || content.Id.Length == 0) {
+                throw new ArgumentOutOfRangeException("Document to update must have Id set.");
+            }
+            if(content.Rev == null || content.Rev.Length == 0) {
+                throw new ArgumentOutOfRangeException("Document to update must have current Rev set.");
+            }
+            return await PutDocument<T>(content, content.Id);
+        }
+        
+        public async Task<T> CreateDocument<T>(T content) where T: CouchDocument {
+            if(content.Rev != null) {
+                throw new ArgumentException(String.Format("New documents must not have a parent rev. '{0}' specified.", content.Rev));
+            }
+            if(content.Id != null) {
+                return await PutDocument<T>(content, content.Id);
+            } else {
+                return await PostDocument<T>(content);
+            }
+        }
+        
+        public async Task<T> PostDocument<T>(T content) where T: CouchDocument {
+            var json = CouchDB.SerializeObject(content);
+            var resultantJson = await PostRawDocument(json);
+            var result = JsonConvert.DeserializeObject<DocumentCreationResult>(resultantJson);
+            content.Id = result.Id;
+            content.Rev = result.Rev;
+            return content;
+        }
+
+        public async Task<DD> UpdateDesignDocument<DD>() where DD : DesignDocument, new() {
+            // while the DesignDocument objects themselves are intended to have no runtime state,
+            // an instanced version is used for serialization and submission.
+            var pd = new DD();
+            return await this.CreateDocument<DD>(pd);
+        }
+
+        public async Task<string> GetViewRaw(String designDocName, String viewName) {
+            var uri = BuildViewUri(designDocName, viewName);
+            var r = await CouchDB.GetRawAsync(uri);
+            return await r.Content.ReadAsStringAsync();
+        }
+
+        // http://wiki.apache.org/couchdb/HTTP_view_API
+        public async Task<List<T>> GetView<T>(String database, String designDocName, String viewName) where T : CouchDocument, new() {
+            var fetchedJson = await GetViewRaw(designDocName, viewName);
+            var viewResult = JsonConvert.DeserializeObject<ViewResult<T>>(fetchedJson);
+            return viewResult.Rows;
+        }
+        
+        /// <summary>
+        /// Gets the contents of the view, specified by means of the programmatic local
+        /// representations of the Design Document and the View.
+        /// </summary>
+        /// <returns>
+        /// All of the 
+        /// </returns>
+        /// <param name='database'>
+        /// Database name.
+        /// </param>
+        /// <typeparam name='D'>
+        /// DesignDocument class that contains the view.
+        /// </typeparam>
+        /// <typeparam name='V'>
+        /// View class, as usually nested within the DesignDocument class.
+        /// </typeparam>
+        /// <typeparam name='T'>
+        /// CouchDocument type for the actual documents received back from the view.
+        /// </typeparam>
+        public async Task<List<T>> GetView<D, V, T>(String database) where D : DesignDocument where V : View where T : CouchDocument, new() {
+            return await GetView<T>(database, DesignDocument.GetDesignDocumentName<D>(), typeof(V).Name);
+        }
+    }
+
     /// <summary>
     /// Couch.
     /// 
@@ -193,6 +368,7 @@ namespace SharpCouch
     {
         private string Hostname;
         private int Port;
+
 
         public static string UriJoin(String basePath, String relativePath) {
             if(basePath == null || basePath.Length == 0) {
@@ -221,19 +397,7 @@ namespace SharpCouch
             return UriJoin(BuildServerUri(), database);
         }
 
-        public Uri BuildDocumentUri(String database, String id) {
-            var dbUri = BuildDatabaseUri(database);
-            return UriJoin(dbUri, id);
-        }
 
-        public Uri BuildDesignDocumentUri(String database, String designDocumentName) {
-            var dbUri = BuildDatabaseUri(database);
-            return UriJoin(UriJoin(dbUri, "_design"), designDocumentName);
-        }
-
-        public Uri BuildViewUri(String database, String designDocumentName, String viewName) {
-            return UriJoin(UriJoin(BuildDesignDocumentUri(database, designDocumentName), "_view"), viewName);
-        }
 
         public CouchException HandleError(CouchError error, HttpStatusCode statusCode) {
             if (statusCode == HttpStatusCode.NotFound) {
@@ -304,117 +468,11 @@ namespace SharpCouch
             return serverInfo.Version;
         }
 
-        public async Task<String> GetRawDocument(String database, String id) {
-            var uri = BuildDocumentUri(database, id);
-
-            Console.WriteLine("Fetching document from: {0}", uri);
-
-            var response = await GetRawAsync(uri);
-
-            return await response.Content.ReadAsStringAsync();
-        }
-
-        /// </param>
-        public async Task<T> GetDocument<T>(String database, String id) where T : CouchDocument {
-            var fetchedJson = await GetRawDocument(database, id);
-            return JsonConvert.DeserializeObject<T>(fetchedJson);
-        }
-
-        public async Task<T> GetDesignDocument<T>(String database, String id) where T : DesignDocument {
-            var fetchedJson = await GetRawDocument(database, id);
-            return JsonConvert.DeserializeObject<T>(fetchedJson);
-        }
-
-        /// <summary>
-        /// Updates or creates a document, with specified id, with arbitrary string data.
-        /// </summary>
-        /// <returns>
-        /// Result data produced by CouchDB.  JSON with just id and rev, usually.
-        /// </returns>
-        /// <param name='content'>
-        /// String data.  Remember, CouchDB expects JSON.
-        /// </param>
-        /// <param name='id'>
-        /// ID of the document being created/updated.
-        /// </param>
-        public async Task<String> PutRawDocument(String database, String content, String id) {
-            var uri = BuildDocumentUri(database, id);
-            Console.WriteLine("Posting document to: {0}", uri);
-
-            var httpContent = new StringContent(content);
-            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
-            var response = await PutRawAsync(uri, httpContent);
-
-            return await response.Content.ReadAsStringAsync();
-        }
-
-        public async Task<String> PostRawDocument(String database, String content) {
-            var uri = BuildDatabaseUri(database);
-
-            var httpContent = new StringContent(content);
-            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
-            var response = await PostRawAsync(uri, httpContent);
-
-            return await response.Content.ReadAsStringAsync();
-        }
-
-        /// <summary>
-        /// Updates an existing document in the database.
-        /// </summary>
-        /// <returns>
-        /// The document.
-        /// </returns>
-        /// <param name='database'>
-        /// Database name.
-        /// </param>
-        /// <param name='content'>
-        /// The Document object to update.  Id and Rev must both be set.
-        /// </param>
-        /// <typeparam name='T'>
-        /// The document type.
-        /// </typeparam>
-        public async Task<T> UpdateDocument<T>(String database, T content) where T: CouchDocument {
-            if(content.Id == null || content.Id.Length == 0) {
-                throw new ArgumentOutOfRangeException("Document to update must have Id set.");
-            }
-            if(content.Rev == null || content.Rev.Length == 0) {
-                throw new ArgumentOutOfRangeException("Document to update must have current Rev set.");
-            }
-            return await PutDocument<T>(database, content, content.Id);
-        }
-
-        public async Task<T> CreateDocument<T>(String database, T content) where T: CouchDocument {
-            if(content.Rev != null) {
-                throw new ArgumentException(String.Format("New documents must not have a parent rev. '{0}' specified.", content.Rev));
-            }
-            if(content.Id != null) {
-                return await PutDocument<T>(database, content, content.Id);
-            } else {
-                return await PostDocument<T>(database, content);
-            }
-        }
-
         public string SerializeObject(CouchDocument doc) {
             return JsonConvert.SerializeObject(doc, Formatting.Indented, new JsonSerializerSettings {DefaultValueHandling = DefaultValueHandling.Ignore});
         }
 
-        public async Task<T> PutDocument<T>(String database, T content, String id) where T: CouchDocument {
-            var json = SerializeObject(content);
-            var resultantJson = await PutRawDocument(database, json, id);
-            // TODO; this will screw up, becase we do *NOT* get the whole object back.  instead, we must make an UpdateResult object, deserialize to that, and set them back into the POCO
-            return JsonConvert.DeserializeObject<T>(resultantJson);
-        }
 
-        public async Task<T> PostDocument<T>(String database, T content) where T: CouchDocument {
-            var json = SerializeObject(content);
-            var resultantJson = await PostRawDocument(database, json);
-            var result = JsonConvert.DeserializeObject<DocumentCreationResult>(resultantJson);
-            content.Id = result.Id;
-            content.Rev = result.Rev;
-            return content;
-        }
 
         public async Task CreateDatabase(String database) {
             var uri = BuildDatabaseUri(database);
@@ -443,55 +501,18 @@ namespace SharpCouch
             return r.StatusCode != HttpStatusCode.NotFound;
         }
 
-        public async Task<CouchDatabase> GetDatabaseInfo(string database) {
+        public async Task<DatabaseInfo> GetDatabaseInfo(string database) {
             // TODO factor apart get/updateDocument even more into single-document fetching code, usable from GetDocument and PutDocumentUpdate.
             var uri = BuildDatabaseUri(database);
             var r = await GetRawAsync(uri);
-            var fetchedJson = r.Content.ToString();
-            return JsonConvert.DeserializeObject<CouchDatabase>(fetchedJson);
+            var fetchedJson = await r.Content.ReadAsStringAsync();
+            return JsonConvert.DeserializeObject<DatabaseInfo>(fetchedJson);
         }
 
-        public async Task<DD> UpdateDesignDocument<DD>(string database) where DD : DesignDocument, new() {
-            // while the DesignDocument objects themselves are intended to have no runtime state,
-            // an instanced version is used for serialization and submission.
-            var pd = new DD();
-            return await this.CreateDocument<DD>(database, pd);
-        }
-
-        public async Task<string> GetViewRaw(String database, String designDocName, String viewName) {
-            var uri = BuildViewUri(database, designDocName, viewName);
-            var r = await GetRawAsync(uri);
-            return await r.Content.ReadAsStringAsync();
-        }
-
-        // http://wiki.apache.org/couchdb/HTTP_view_API
-        public async Task<List<T>> GetView<T>(String database, String designDocName, String viewName) where T : CouchDocument, new() {
-            var fetchedJson = await GetViewRaw(database, designDocName, viewName);
-            var viewResult = JsonConvert.DeserializeObject<ViewResult<T>>(fetchedJson);
-            return viewResult.Rows;
-        }
-
-        /// <summary>
-        /// Gets the contents of the view, specified by means of the programmatic local
-        /// representations of the Design Document and the View.
-        /// </summary>
-        /// <returns>
-        /// All of the 
-        /// </returns>
-        /// <param name='database'>
-        /// Database name.
-        /// </param>
-        /// <typeparam name='D'>
-        /// DesignDocument class that contains the view.
-        /// </typeparam>
-        /// <typeparam name='V'>
-        /// View class, as usually nested within the DesignDocument class.
-        /// </typeparam>
-        /// <typeparam name='T'>
-        /// CouchDocument type for the actual documents received back from the view.
-        /// </typeparam>
-        public async Task<List<T>> GetView<D, V, T>(String database) where D : DesignDocument where V : View where T : CouchDocument, new() {
-            return await GetView<T>(database, DesignDocument.GetDesignDocumentName<D>(), typeof(V).Name);
+        public async Task<CouchDatabase> OpenDatabase(String databaseName) {
+            // will throw a NotFound error if database does not exist
+            var dbInfo = await GetDatabaseInfo(databaseName);
+            return new CouchDatabase(this, databaseName);
         }
 
         public Couch(string hostname, int port) {

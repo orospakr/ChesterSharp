@@ -42,6 +42,8 @@ namespace SharpCouch
         public static readonly string TEST_DATABASE = "chestersharp_test";
         public static readonly string CREATION_TEST_DATABASE = "chestersharp_creation_test";
 
+        private CouchDatabase TestDatabase;
+
         // these are instantiated in BeforeEach() because they are modified (id and rev updated) by the
         // Couch routines they are subjected to, and this TestFixture object is only instantiated
         // once for all tests.
@@ -76,8 +78,12 @@ namespace SharpCouch
             couch.EnsureDatabaseDeleted(CREATION_TEST_DATABASE).Wait();
             couch.CreateDatabase(TEST_DATABASE).Wait();
 
+            var dbOpenTask = couch.OpenDatabase(TEST_DATABASE);
+            dbOpenTask.Wait();
+            TestDatabase = dbOpenTask.Result;
+
             foreach (var personFixture in PersonFixtures) {
-                couch.CreateDocument<Person>(TEST_DATABASE, personFixture).Wait();
+                TestDatabase.CreateDocument<Person>(personFixture).Wait();
             }
         }
 
@@ -105,7 +111,7 @@ namespace SharpCouch
 
         [Test]
         public void ShouldBuildDocumentUri() {
-            Assert.AreEqual("http://localhost:5984/foo/mynote", couch.BuildDocumentUri("foo", "mynote").ToString());
+            Assert.AreEqual("http://localhost:5984/chestersharp_test/mynote", TestDatabase.BuildDocumentUri("mynote").ToString());
         }
 
         [Test]
@@ -117,7 +123,7 @@ namespace SharpCouch
         public void ShouldThrowErrorPutBogusDocumentUpdateToCouchDb() {
             bool gotException = false;
             try {
-                var t = couch.PutRawDocument(TEST_DATABASE, "blah blah", "anidentifier");
+                var t = TestDatabase.PutRawDocument("blah blah", "anidentifier");
                 t.Wait();
             } catch (AggregateException ae) {
                 ae.Handle( (e) => {
@@ -136,10 +142,10 @@ namespace SharpCouch
             var newName = "Excellent Economist";
             Assert.NotNull(HayekFixture.Rev);
             HayekFixture.Name = newName;
-            var t = couch.UpdateDocument<Person>(TEST_DATABASE, HayekFixture);
+            var t = TestDatabase.UpdateDocument<Person>(HayekFixture);
             t.Wait();
 
-            var check = couch.GetDocument<Person>(TEST_DATABASE, HayekFixture.Id);
+            var check = TestDatabase.GetDocument<Person>(HayekFixture.Id);
             check.Wait();
             Assert.AreEqual(newName, check.Result.Name);
         }
@@ -149,7 +155,7 @@ namespace SharpCouch
             var gotException = false;
             try {
                 var p = new Person { Name = "MissingNo", Id = "missigno"};
-                var t = couch.UpdateDocument<Person>(TEST_DATABASE, p);
+                var t = TestDatabase.UpdateDocument<Person>(p);
                 t.Wait();
             } catch (AggregateException ae) {
                 ae.Handle((e) => {
@@ -200,7 +206,7 @@ namespace SharpCouch
 
         [Test]
         public void ShouldGetRawDocument () {
-            var r = couch.GetRawDocument(TEST_DATABASE, SallyFixture.Id);
+            var r = TestDatabase.GetRawDocument(SallyFixture.Id);
             r.Wait();
             Console.Out.WriteLine(r.Result);
         }
@@ -244,14 +250,14 @@ namespace SharpCouch
         public void ShouldCreateDesignDocument() {
             var dd = new PersonDesign();
             // var t = couch.CreateDocument<PersonDesign>(TEST_DATABASE, dd);
-            var t = couch.UpdateDesignDocument<PersonDesign>(TEST_DATABASE);
+            var t = TestDatabase.UpdateDesignDocument<PersonDesign>();
             t.Wait();
         }
 
         [Test]
         public void ShouldGetViewOfDesignDocument() {
             ShouldCreateDesignDocument();
-            var t = couch.GetView<Person>(TEST_DATABASE, DesignDocument.GetDesignDocumentName<PersonDesign>(), "All");
+            var t = TestDatabase.GetView<Person>(TEST_DATABASE, DesignDocument.GetDesignDocumentName<PersonDesign>(), "All");
             t.Wait();
             Assert.AreEqual(2, t.Result.Count);
         }
@@ -259,7 +265,7 @@ namespace SharpCouch
         [Test]
         public void ShouldGetViewOfDesignDocumentWithTypeSafeApi() {
             ShouldCreateDesignDocument();
-            var t = couch.GetView<PersonDesign, PersonDesign.All, Person>(TEST_DATABASE);
+            var t = TestDatabase.GetView<PersonDesign, PersonDesign.All, Person>(TEST_DATABASE);
             t.Wait();
             Assert.AreEqual(2, t.Result.Count);
         }
