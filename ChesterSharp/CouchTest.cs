@@ -246,7 +246,22 @@ namespace SharpCouch
             // var t = couch.CreateDocument<PersonDesign>(TEST_DATABASE, dd);
             var t = couch.UpdateDesignDocument<PersonDesign>(TEST_DATABASE);
             t.Wait();
-            // TODO: ANDREW START HERE and TEST invokation of views!
+        }
+
+        [Test]
+        public void ShouldGetViewOfDesignDocument() {
+            ShouldCreateDesignDocument();
+            var t = couch.GetView<Person>(TEST_DATABASE, DesignDocument.GetDesignDocumentName<PersonDesign>(), "All");
+            t.Wait();
+            Assert.AreEqual(2, t.Result.Count);
+        }
+
+        [Test]
+        public void ShouldGetViewOfDesignDocumentWithTypeSafeApi() {
+            ShouldCreateDesignDocument();
+            var t = couch.GetView<PersonDesign, PersonDesign.All, Person>(TEST_DATABASE);
+            t.Wait();
+            Assert.AreEqual(2, t.Result.Count);
         }
 	}
 }

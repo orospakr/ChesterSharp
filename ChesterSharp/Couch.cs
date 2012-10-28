@@ -61,6 +61,20 @@ namespace SharpCouch
             }
         }
 
+        public static string GetDesignDocumentName(Type t) {
+            var attrs = t.GetCustomAttributes(typeof(DesignDocument.DesignDocumentName), true);
+            if(attrs.Length == 0) {
+                return t.Name;
+            } else {
+                return ((DesignDocumentName)attrs[0]).Name;
+            }
+        }
+
+        public static string GetDesignDocumentName<T>() where T : DesignDocument {
+            var t = typeof(T);
+            return GetDesignDocumentName(t);
+        }
+
         [JsonProperty("views")]
         public Dictionary<string, View> Views
         {
@@ -78,13 +92,9 @@ namespace SharpCouch
             }
         }
 
-        public string GetName() { 
-            var attrs =  this.GetType().GetCustomAttributes(typeof(DesignDocument.DesignDocumentName), true);
-            if(attrs.Length == 0) {
-                return this.GetType().Name;
-            } else {
-                return ((DesignDocumentName)attrs[0]).Name;
-            }
+        public string GetName() {
+            var type = this.GetType();
+            return GetDesignDocumentName(type);
         }
 
         [JsonProperty("_id")]
@@ -110,6 +120,17 @@ namespace SharpCouch
         
         [JsonProperty("rev")]
         public string Rev { get; set; }
+    }
+
+    public class ViewResult<T> where T : CouchDocument, new() {
+        [JsonProperty("total_rows")]
+        public int TotalRows { get; set; }
+
+        [JsonProperty("offset")]
+        public int Offset { get; set; }
+
+        [JsonProperty("rows")]
+        public List<T> Rows { get; set; }
     }
 
     public class CouchException : Exception {
@@ -205,6 +226,15 @@ namespace SharpCouch
             return UriJoin(dbUri, id);
         }
 
+        public Uri BuildDesignDocumentUri(String database, String designDocumentName) {
+            var dbUri = BuildDatabaseUri(database);
+            return UriJoin(UriJoin(dbUri, "_design"), designDocumentName);
+        }
+
+        public Uri BuildViewUri(String database, String designDocumentName, String viewName) {
+            return UriJoin(UriJoin(BuildDesignDocumentUri(database, designDocumentName), "_view"), viewName);
+        }
+
         public CouchException HandleError(CouchError error, HttpStatusCode statusCode) {
             if (statusCode == HttpStatusCode.NotFound) {
                 return new NotFoundException(error.Reason, statusCode);
@@ -214,6 +244,7 @@ namespace SharpCouch
         }
 
         public async Task<HttpResponseMessage> GetRawAsync(Uri uri) {
+            Console.WriteLine("GET: {0}", uri.ToString());
             var http = new System.Net.Http.HttpClient();
             var response = await http.GetAsync(uri);
             if(response.IsSuccessStatusCode) {
@@ -274,13 +305,11 @@ namespace SharpCouch
         }
 
         public async Task<String> GetRawDocument(String database, String id) {
-
             var uri = BuildDocumentUri(database, id);
 
             Console.WriteLine("Fetching document from: {0}", uri);
 
             var response = await GetRawAsync(uri);
-            response.EnsureSuccessStatusCode();
 
             return await response.Content.ReadAsStringAsync();
         }
@@ -427,6 +456,42 @@ namespace SharpCouch
             // an instanced version is used for serialization and submission.
             var pd = new DD();
             return await this.CreateDocument<DD>(database, pd);
+        }
+
+        public async Task<string> GetViewRaw(String database, String designDocName, String viewName) {
+            var uri = BuildViewUri(database, designDocName, viewName);
+            var r = await GetRawAsync(uri);
+            return await r.Content.ReadAsStringAsync();
+        }
+
+        // http://wiki.apache.org/couchdb/HTTP_view_API
+        public async Task<List<T>> GetView<T>(String database, String designDocName, String viewName) where T : CouchDocument, new() {
+            var fetchedJson = await GetViewRaw(database, designDocName, viewName);
+            var viewResult = JsonConvert.DeserializeObject<ViewResult<T>>(fetchedJson);
+            return viewResult.Rows;
+        }
+
+        /// <summary>
+        /// Gets the contents of the view, specified by means of the programmatic local
+        /// representations of the Design Document and the View.
+        /// </summary>
+        /// <returns>
+        /// All of the 
+        /// </returns>
+        /// <param name='database'>
+        /// Database name.
+        /// </param>
+        /// <typeparam name='D'>
+        /// DesignDocument class that contains the view.
+        /// </typeparam>
+        /// <typeparam name='V'>
+        /// View class, as usually nested within the DesignDocument class.
+        /// </typeparam>
+        /// <typeparam name='T'>
+        /// CouchDocument type for the actual documents received back from the view.
+        /// </typeparam>
+        public async Task<List<T>> GetView<D, V, T>(String database) where D : DesignDocument where V : View where T : CouchDocument, new() {
+            return await GetView<T>(database, DesignDocument.GetDesignDocumentName<D>(), typeof(V).Name);
         }
 
         public Couch(string hostname, int port) {
