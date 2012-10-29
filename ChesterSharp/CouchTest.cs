@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using NUnit.Framework;
 using System.Net.Http;
@@ -257,17 +258,23 @@ namespace SharpCouch
         [Test]
         public void ShouldGetViewOfDesignDocument() {
             ShouldCreateDesignDocument();
-            var t = TestDatabase.GetView<Person>(TEST_DATABASE, DesignDocument.GetDesignDocumentName<PersonDesign>(), "All");
+            var t = TestDatabase.GetDocsFromView<Person>(DesignDocument.GetDesignDocumentName<PersonDesign>(), "all");
             t.Wait();
-            Assert.AreEqual(2, t.Result.Count);
+            var r = new List<Person>(t.Result);
+            Assert.AreEqual(2, r.Count());
+            foreach (var p in t.Result) {
+                Console.WriteLine("YA, WHUT: " + p.Name);
+            }
+            Assert.AreEqual(1, (from p in t.Result where p.Name == "Sally Acorn" select p).Count());
         }
 
         [Test]
         public void ShouldGetViewOfDesignDocumentWithTypeSafeApi() {
             ShouldCreateDesignDocument();
-            var t = TestDatabase.GetView<PersonDesign, PersonDesign.All, Person>(TEST_DATABASE);
+            var t = TestDatabase.GetDocsFromView<PersonDesign, PersonDesign.All, Person>();
             t.Wait();
-            Assert.AreEqual(2, t.Result.Count);
+            var persons = new List<Person>(t.Result);
+            Assert.AreEqual(2, persons.Count());
         }
 	}
 }

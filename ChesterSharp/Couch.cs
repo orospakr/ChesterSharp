@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using System.IO;
@@ -28,7 +29,7 @@ namespace SharpCouch
 
     public class CouchDocument {
         [JsonProperty("_id")]
-        public string Id { get; set; }
+        public virtual string Id { get; set; }
 
         [JsonProperty("_rev")]
         public string Rev { get; set; }
@@ -45,11 +46,18 @@ namespace SharpCouch
     }
 
     public abstract class View {
+        // TODO: var processed = pair.Value.Replace("$MODEL_NAME", String.Format("\"{0}\"", ModelName()));
+
         [JsonProperty("map")]
         public abstract String Map { get; }
 
         [JsonProperty("reduce")]
         public virtual String Reduce { get { return null; } }
+
+        public static string GetViewName(Type t) {
+            // TODO check for an attribute override
+            return t.Name.ToLowerInvariant();
+        }
     }
 
     public class DesignDocument : CouchDocument {
@@ -81,11 +89,11 @@ namespace SharpCouch
             get
             {
                 var result = new Dictionary<string, View>();
-                foreach(var type in this.GetType().GetNestedTypes()) {
-                    if(typeof(View).IsAssignableFrom(type)) {
-                        var constructors = type.GetConstructor(Type.EmptyTypes);
+                foreach(var viewType in this.GetType().GetNestedTypes()) {
+                    if(typeof(View).IsAssignableFrom(viewType)) {
+                        var constructors = viewType.GetConstructor(Type.EmptyTypes);
                         var viewObj = constructors.Invoke(new object[] { });
-                        result.Add(type.Name, (View)viewObj);
+                        result.Add(View.GetViewName(viewType), (View)viewObj);
                     }
                 }
                 return result;
@@ -98,7 +106,7 @@ namespace SharpCouch
         }
 
         [JsonProperty("_id")]
-        public new string Id
+        public override string Id
         {
             get
             {
@@ -122,6 +130,17 @@ namespace SharpCouch
         public string Rev { get; set; }
     }
 
+    public class ViewResultRow<T> where T : CouchDocument, new() {
+        [JsonProperty("id")]
+        public string Id { get; set; }
+
+        [JsonProperty("rev")]
+        public string Rev { get; set; }
+
+        [JsonProperty("doc")]
+        public T Doc { get; set; }
+    }
+
     public class ViewResult<T> where T : CouchDocument, new() {
         [JsonProperty("total_rows")]
         public int TotalRows { get; set; }
@@ -130,7 +149,7 @@ namespace SharpCouch
         public int Offset { get; set; }
 
         [JsonProperty("rows")]
-        public List<T> Rows { get; set; }
+        public List<ViewResultRow<T>> Rows { get; set; }
     }
 
     public class CouchException : Exception {
@@ -283,7 +302,7 @@ namespace SharpCouch
         /// </typeparam>
         public async Task<T> UpdateDocument<T>(T content) where T: CouchDocument {
             if(content.Id == null || content.Id.Length == 0) {
-                throw new ArgumentOutOfRangeException("Document to update must have Id set.");
+                throw new ArgumentOutOfRangeException(String.Format("Document to update (of type {0}) must have Id set (got back '{1}').", typeof(T).Name, content.Id));
             }
             if(content.Rev == null || content.Rev.Length == 0) {
                 throw new ArgumentOutOfRangeException("Document to update must have current Rev set.");
@@ -315,20 +334,37 @@ namespace SharpCouch
             // while the DesignDocument objects themselves are intended to have no runtime state,
             // an instanced version is used for serialization and submission.
             var pd = new DD();
+
+            try {
+                // just use the base CouchDocument instead of DesignDocument, because DesignDocument
+                // is not meant to be mutable and therefore isn't deserializable
+                Console.WriteLine("Checking for existing design document for {0}...", pd.Id);
+                var existing = await this.GetDocument<CouchDocument>(pd.Id);
+                pd.Rev = existing.Rev;
+                Console.WriteLine("DD {0} already exists, replacing it.", pd.Id);
+                return await this.UpdateDocument<DD>(pd);
+            } catch (NotFoundException) {
+                Console.WriteLine("DD {0} doesn't already exist, creating it.", pd.Id);
+            }
             return await this.CreateDocument<DD>(pd);
         }
 
-        public async Task<string> GetViewRaw(String designDocName, String viewName) {
+        public async Task<string> GetViewRaw(String designDocName, String viewName, bool includeDocs) {
             var uri = BuildViewUri(designDocName, viewName);
+            if(includeDocs) {
+            var builder = new UriBuilder(uri);
+                builder.Query += "include_docs=true";
+                uri = builder.Uri;
+            }
             var r = await CouchDB.GetRawAsync(uri);
             return await r.Content.ReadAsStringAsync();
         }
 
         // http://wiki.apache.org/couchdb/HTTP_view_API
-        public async Task<List<T>> GetView<T>(String database, String designDocName, String viewName) where T : CouchDocument, new() {
-            var fetchedJson = await GetViewRaw(designDocName, viewName);
+        public async Task<IEnumerable<T>> GetDocsFromView<T>(String designDocName, String viewName) where T : CouchDocument, new() {
+            var fetchedJson = await GetViewRaw(designDocName, viewName, true);
             var viewResult = JsonConvert.DeserializeObject<ViewResult<T>>(fetchedJson);
-            return viewResult.Rows;
+            return from c in viewResult.Rows select c.Doc;
         }
         
         /// <summary>
@@ -350,8 +386,8 @@ namespace SharpCouch
         /// <typeparam name='T'>
         /// CouchDocument type for the actual documents received back from the view.
         /// </typeparam>
-        public async Task<List<T>> GetView<D, V, T>(String database) where D : DesignDocument where V : View where T : CouchDocument, new() {
-            return await GetView<T>(database, DesignDocument.GetDesignDocumentName<D>(), typeof(V).Name);
+        public async Task<IEnumerable<T>> GetDocsFromView<D, V, T>() where D : DesignDocument where V : View where T : CouchDocument, new() {
+            return await GetDocsFromView<T>(DesignDocument.GetDesignDocumentName<D>(), View.GetViewName(typeof(V)));
         }
     }
 
@@ -421,6 +457,7 @@ namespace SharpCouch
         }
 
         public async Task<HttpResponseMessage> DeleteRawAsync(Uri uri) {
+            Console.WriteLine("DELETE: {0}", uri.ToString());
             var http = new System.Net.Http.HttpClient();
             var response = await http.DeleteAsync(uri);
             if(response.IsSuccessStatusCode) {
@@ -433,6 +470,7 @@ namespace SharpCouch
         }
 
         public async Task<HttpResponseMessage> PostRawAsync(Uri uri, HttpContent content) {
+            Console.WriteLine("POST: {0}", uri.ToString());
             var http = new System.Net.Http.HttpClient();
             var response = await http.PostAsync(uri, content);
             if(response.IsSuccessStatusCode) {
@@ -444,6 +482,7 @@ namespace SharpCouch
         }
 
         public async Task<HttpResponseMessage> PutRawAsync(Uri uri, HttpContent content) {
+            Console.WriteLine("PUT: {0}", uri.ToString());
             var http = new System.Net.Http.HttpClient();
             var response = await http.PutAsync(uri, content);
             if(response.IsSuccessStatusCode) {
@@ -471,8 +510,6 @@ namespace SharpCouch
         public string SerializeObject(CouchDocument doc) {
             return JsonConvert.SerializeObject(doc, Formatting.Indented, new JsonSerializerSettings {DefaultValueHandling = DefaultValueHandling.Ignore});
         }
-
-
 
         public async Task CreateDatabase(String database) {
             var uri = BuildDatabaseUri(database);

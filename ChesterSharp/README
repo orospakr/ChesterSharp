@@ -5,15 +5,17 @@ Plans:
 * fetch a single document, with DTO: DONE
 * post a single document, with DTO: DONE
 
-* fetch a view of multiple documents, with DTO
+* fetch a view of multiple documents, with DTO DONE
 * design documents DONE
 * create a database: DONE
-* view-level mapping to DTOs (built in find/findAll() routines)
 * compare current design documents in system, update if necessary
 * changes feed (whee streaming)
 * changes feed with specified view
 * list revisions, conflict resolution?
 * attachments
+* declarative data validation on CouchDocuments
+
+* some sort of simple ORM/Model: view-level mapping to DTOs (built in find/findAll() routines, etc.)
 
 
 * sequence numbering? seems like a local rememberance -- at least
