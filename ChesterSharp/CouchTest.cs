@@ -5,7 +5,7 @@ using NUnit.Framework;
 using System.Net.Http;
 using Newtonsoft.Json;
 
-namespace SharpCouch
+namespace ChesterSharp.Tests
 {
     public class Thinger : CouchDocument {
     }

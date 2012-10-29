@@ -9,7 +9,7 @@ using System.Runtime.Serialization;
 using System.Net.Http.Headers;
 using System.Net;
 
-namespace SharpCouch
+namespace ChesterSharp
 {
     /// <summary>
     /// CouchDB version information.
