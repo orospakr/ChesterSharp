@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using System.Net.Http;
 using Newtonsoft.Json;
+using ChesterSharp.Exceptions;
+using ChesterSharp.Documents;
 
 namespace ChesterSharp.Tests
 {

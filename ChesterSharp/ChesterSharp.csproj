@@ -7,7 +7,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3A4095DD-1CB4-4FFA-A2B9-7685DE93BBD3}</ProjectGuid>
     <OutputType>Library</OutputType>
-    <RootNamespace>SharpCouch</RootNamespace>
+    <RootNamespace>ChesterSharp</RootNamespace>
     <AssemblyName>SharpCouch</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
   </PropertyGroup>
@@ -38,6 +38,19 @@
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="CouchTest.cs" />
     <Compile Include="Couch.cs" />
+    <Compile Include="ChesterSharp.Answers\ActionResult.cs" />
+    <Compile Include="ChesterSharp.Answers\DocumentCreationResult.cs" />
+    <Compile Include="ChesterSharp.Answers\ViewResultRow.cs" />
+    <Compile Include="ChesterSharp.Answers\ViewResult.cs" />
+    <Compile Include="ChesterSharp.Exceptions\NotFoundException.cs" />
+    <Compile Include="ChesterSharp.Exceptions\CouchException.cs" />
+    <Compile Include="ChesterSharp.Answers\DatabaseInfo.cs" />
+    <Compile Include="CouchDatabase.cs" />
+    <Compile Include="ChesterSharp.Answers\CouchError.cs" />
+    <Compile Include="ChesterSharp.Documents\DesignDocument.cs" />
+    <Compile Include="ChesterSharp.Answers\CouchDBVersion.cs" />
+    <Compile Include="ChesterSharp.Documents\View.cs" />
+    <Compile Include="ChesterSharp.Documents\CouchDocument.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>
@@ -48,5 +61,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="README" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="ChesterSharp.Answers\" />
+    <Folder Include="ChesterSharp.Exceptions\" />
+    <Folder Include="ChesterSharp.Documents\" />
   </ItemGroup>
 </Project>
