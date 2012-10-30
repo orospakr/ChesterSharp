@@ -58,8 +58,14 @@ namespace ChesterSharp
         public async Task<T> PutDocument<T>(T content, String id) where T: CouchDocument {
             var json = CouchDB.SerializeObject(content);
             var resultantJson = await PutRawDocument(json, id);
-            // TODO; this will screw up, becase we do *NOT* get the whole object back.  instead, we must make an UpdateResult object, deserialize to that, and set them back into the POCO
-            return JsonConvert.DeserializeObject<T>(resultantJson);
+            var result = JsonConvert.DeserializeObject<DocumentCreationResult>(resultantJson);
+            try {
+                content.Id = result.Id;
+            } catch (NotImplementedException e) {
+                // things like design documents have a hardcoded ID and object to having it manually set.
+            }
+            content.Rev = result.Rev;
+            return content;
         }
         
         /// <summary>

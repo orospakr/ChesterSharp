@@ -258,6 +258,26 @@ namespace ChesterSharp.Tests
         }
 
         [Test]
+        public void ShouldCreateADocumentWithoutAProvidedId() {
+            var lispGuru = new Person() { Name = "John McCarthy" };
+            var t = TestDatabase.CreateDocument<Person>(lispGuru);
+            t.Wait();
+            Assert.AreSame(lispGuru, t.Result);
+            Assert.NotNull(t.Result.Id);
+            Assert.NotNull(t.Result.Rev);
+        }
+
+        [Test]
+        public void ShouldCreateADocumentWithAProvidedId() {
+            var alanTuring = new Person() { Name = "Alan Turing", Id = "alanturing" };
+            var t = TestDatabase.CreateDocument<Person>(alanTuring);
+            t.Wait();
+            Assert.AreSame(alanTuring, t.Result);
+            Assert.NotNull(t.Result.Id);
+            Assert.NotNull(t.Result.Rev);
+        }
+
+        [Test]
         public void ShouldGetViewOfDesignDocument() {
             ShouldCreateDesignDocument();
             var t = TestDatabase.GetDocsFromView<Person>(DesignDocument.GetDesignDocumentName<PersonDesign>(), "all");

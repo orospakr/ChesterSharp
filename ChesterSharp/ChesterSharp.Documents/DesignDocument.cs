@@ -58,7 +58,7 @@ namespace ChesterSharp.Documents
             }
             set
             {
-                throw new NotImplementedException();
+                throw new NotImplementedException("Design documents have pre-defined IDs.");
             }
         }
         

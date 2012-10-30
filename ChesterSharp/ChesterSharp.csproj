@@ -54,17 +54,17 @@
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>
-    <ProjectReference Include="..\..\snively\dependencies\Newtonsoft.Json\Src\Newtonsoft.Json\Newtonsoft.Json.csproj">
-      <Project>{A9AE40FF-1A21-414A-9FE7-3BE13644CC6D}</Project>
-      <Name>Newtonsoft.Json</Name>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <None Include="README" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="ChesterSharp.Answers\" />
     <Folder Include="ChesterSharp.Exceptions\" />
     <Folder Include="ChesterSharp.Documents\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\dependencies\Newtonsoft.Json\Src\Newtonsoft.Json\Newtonsoft.Json.csproj">
+      <Project>{A9AE40FF-1A21-414A-9FE7-3BE13644CC6D}</Project>
+      <Name>Newtonsoft.Json</Name>
+    </ProjectReference>
   </ItemGroup>
 </Project>

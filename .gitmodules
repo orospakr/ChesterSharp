@@ -1,0 +1,3 @@
+[submodule "dependencies/Newtonsoft.Json"]
+	path = dependencies/Newtonsoft.Json
+	url = git://github.com/JamesNK/Newtonsoft.Json.git
