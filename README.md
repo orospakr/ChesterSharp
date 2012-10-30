@@ -24,7 +24,6 @@ Open A Database:
 ```csharp
 Couch couchdb = new ChesterSharp.Couch("localhost", 5984);
 CouchDatabase myDatabase = await couchdb.OpenDatabase("mydatabase");
-
 ```
 
 Fetch a document from CouchDB, as a string:
@@ -36,13 +35,11 @@ String myDocument = await myDatabase.GetRawDocument("documentid");
 Fetch a document from CouchDB, with a POCO type:
 
 ```csharp
-
 public class Person : CouchDocument {
     public String Name { get; set; }
 }
 
 Person person = await couchdb.GetDocument<Person>("personid");
-
 ```
 
 Create a document in CouchDB, with a POCO type (reusing type above):
@@ -54,7 +51,6 @@ var person = new Person { Name = "Ludwig von Mises", Id = "vonmises" };
 // generated rev (and ID if none was specified), and return it
 
 await couchdb.CreateDocument<Person>(person);
-
 ```
 
 Update an existing document:
