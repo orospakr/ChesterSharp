@@ -84,7 +84,7 @@ public class PersonDesign : ChesterSharp.Documents.DesignDocument {
 }
 
 await myDatabase.UpdateDesignDocument<PersonDesign>();
-'''
+```
 
 Fetch a view:
 
@@ -157,7 +157,10 @@ I haven't yet generated any, sorry.
 * list revisions, conflict resolution?
 * attachments
 * compare current design documents in system, update if necessary
-* declarative data validation on CouchDocuments
+* declarative data validation on CouchDocuments, since couchdb apps
+  should be responsible themselves for incoming data sanity, if
+  possible, so might as well make it convenient.  DataContract stuff
+  possible?
 * sequence numbering? seems like a local rememberance -- at least
   across the lifetime of a given consumer of events that wants
   updates.  have it instantiate an object that remembers seq, and does
@@ -165,7 +168,11 @@ I haven't yet generated any, sorry.
   pretty much the only instance of concurrent access to data in the
   entire library.  wait. seq is across the entire database.  that
   means have it on a single database connection, regardless of view
-  
+* streaming results: instead of buffering up results into a List<> before
+  returning, offer IEnumerable<>s that populate. Is this a good idea?
+* GetView should have a seprate version that can be fed a 
+  derivative POCO type for ViewResultRowValue type that gets the
+  fields emitted from emit() in the couchdb map function.  
 * some sort of simple ORM/Model: view-level mapping to DTOs (built in
   find/findAll() routines, etc.)
 
