@@ -19,7 +19,7 @@ Please note that all of the API is async, in that it returns Tasks
 that can be either `await`ed (C#'s continuations) or passed a lambda
 with `ContinueWith` to invoke when ready.
 
-Open A Database:
+Open a database:
 
 ```csharp
 Couch couchdb = new ChesterSharp.Couch("localhost", 5984);
@@ -35,11 +35,11 @@ String myDocument = await myDatabase.GetRawDocument("documentid");
 Fetch a document from CouchDB, with a POCO type:
 
 ```csharp
-public class Person : CouchDocument {
+public class Person : ChesterSharp.Documents.CouchDocument {
     public String Name { get; set; }
 }
 
-Person person = await couchdb.GetDocument<Person>("personid");
+Person person = await myDatabase.GetDocument<Person>("personid");
 ```
 
 Create a document in CouchDB, with a POCO type (reusing type above):
@@ -50,19 +50,54 @@ var person = new Person { Name = "Ludwig von Mises", Id = "vonmises" };
 // It will update the POCO object with the newly acquired CouchDB
 // generated rev (and ID if none was specified), and return it
 
-await couchdb.CreateDocument<Person>(person);
+await myDatabase.CreateDocument<Person>(person);
 ```
 
 Update an existing document:
 
-```chsharp
-var person = await couchdb.GetDocument<Person>("vonmises");
+```csharp
+var person = await myDatabase.GetDocument<Person>("vonmises");
 person.Name = "Ludvig von Mises, economist";
 
-await couchdb.UpdateDocument<Person>(person);
+await myDatabase.UpdateDocument<Person>(person);
 ```
 
-There's more.  See the tests in `ChesterSharp/CouchTest.cs` for
+Create (or replace) a design document:
+
+```csharp
+// in addition to the POCO above, make a seprate
+// design document class:
+
+public class PersonDesign : ChesterSharp.Documents.DesignDocument {
+    // Views on the design document are defined by special nested
+    // classes.
+    public class All : View {
+        public override string Map { get {
+                return @"function(doc) {
+                    if(doc[""type""] === ""person"") {
+                        emit(doc[""_id""], doc.title);
+                    }
+                }";
+            }
+        }
+    }
+}
+
+await myDatabase.UpdateDesignDocument<PersonDesign>();
+'''
+
+Fetch a view:
+
+```csharp
+// note that, for now, the system always uses include_docs, and
+// deserializes the result into the provided CouchDocument type (the
+// third type argument).  Anything directly emit()ted is currently
+// ignored.
+
+IEnumerable<List<Person>> persons = await myDatabase.GetDocsFromView<PersonDesign, PersonDesign.Living, Person>();
+```
+
+And more.  See the tests in `ChesterSharp/CouchTest.cs` for
 further details.
 
 # Building
