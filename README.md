@@ -94,7 +94,7 @@ Fetch a view:
 // third type argument).  Anything directly emit()ted is currently
 // ignored.
 
-IEnumerable<Person> persons = await myDatabase.GetDocsFromView<PersonDesign, PersonDesign.Living, Person>();
+IEnumerable<Person> persons = await myDatabase.GetDocsFromView<PersonDesign, PersonDesign.All, Person>();
 ```
 
 And more.  See the tests in `ChesterSharp/CouchTest.cs` for
