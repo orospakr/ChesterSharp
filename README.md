@@ -1,5 +1,9 @@
 # ChesterSharp
 
+Copyright (C) 2012 Andrew Clunis <andrew@orospakr.ca>
+
+Licensed under Apache v2 (see COPYING.txt for details)
+
 Asynchronous CouchDB access library in C#, for .net 4.5 and using the
 new HttpClient library.
 
@@ -39,7 +43,7 @@ public class Person : CouchDocument {
 
 Person person = await couchdb.GetDocument<Person>("personid");
 
-'''
+```
 
 Create a document in CouchDB, with a POCO type (reusing type above):
 
